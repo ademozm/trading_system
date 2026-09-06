@@ -1,0 +1,66 @@
+# =============================================================================
+# MANDATE — Katman 4 (Risk Yönetimi) tek doğruluk kaynağı
+# =============================================================================
+# Bu dosya, sistemin *asla* kendi kendine değiştiremeyeceği risk sınırlarını
+# tanımlar. Katman 3'ten (sinyal üretimi) gelen her aday işlem, execution'a
+# gitmeden önce bu sınırlara karşı kontrol edilir (bkz. risk/risk_manager.py).
+#
+# Bu dosyayı değiştirmek sistemin yeniden başlatılmasını gerektirir —
+# çalışırken (LLM ajanı dahil hiçbir bileşen tarafından) değiştirilemez.
+# =============================================================================
+
+# İzin verilen sembol evreni. Bu listede olmayan bir sembol için asla
+# işlem önerisi üretilmez / execution'a gönderilmez.
+symbol_universe:
+  - "BTC/USDT"
+  - "ETH/USDT"
+  - "AAPL"
+  - "MSFT"
+
+# Tek bir işlemin toplam portföye oranı (ör. 0.02 = portföyün %2'si)
+max_position_size_pct: 0.02
+
+# Tüm açık pozisyonların toplamının portföye oranı
+max_total_exposure_pct: 0.30
+
+# İzin verilen maksimum kaldıraç (spot için 1.0, futures için >1.0 olabilir)
+max_leverage: 1.0
+
+# Günlük gerçekleşen kayıp bu yüzdeyi aşarsa sistem otomatik olarak
+# yeni işlem önerisi üretmeyi durdurur (mevcut pozisyonları izlemeye devam eder).
+daily_loss_limit_pct: 0.03
+
+# Bir sembolde art arda izin verilen maksimum kayıplı işlem sayısı
+# (aşılırsa o sembol geçici olarak "soğutma" listesine alınır)
+max_consecutive_losses_per_symbol: 3
+
+# Kill-switch dosyası: bu dosya var olduğu sürece sistem HİÇBİR yeni
+# işlem önerisi üretmez/göndermez. Acil durdurma için bu dosyayı oluşturun:
+#   touch STOP_TRADING
+kill_switch_file: "STOP_TRADING"
+
+# Onay bekleme süresi (saniye). Bu süre içinde Telegram üzerinden
+# onay/red gelmezse öneri otomatik REDDEDİLİR (varsayılan = işlem yapma).
+approval_timeout_seconds: 300
+
+# Varlık sınıfına göre farklı kurallar tanımlamak isterseniz (opsiyonel)
+per_asset_class:
+  crypto:
+    max_leverage: 3.0
+  equity:
+    max_leverage: 1.0
+
+# =============================================================================
+# Piyasa Yapıcılığı (Katman 3d) — AYRI mandate
+# =============================================================================
+# Market making, yön-tahmin stratejilerinden (3a/3b/3c) tamamen farklı bir
+# risk profiline sahiptir (çok daha sık pozisyon değişimi, envanter riski).
+# Bu yüzden yukarıdaki genel mandate'e değil, kendi ayrı sınırlarına tabidir
+# (bkz. signals/market_making/mm_strategy.py MarketMakingConfig).
+market_making:
+  enabled: false          # açıkça true yapılmadan market making modülü ÇALIŞMAZ
+  symbols: []              # ör. ["BTC/USDT"]
+  max_inventory_per_symbol: 1.0
+  gamma: 0.1
+  kappa: 1.5
+  min_spread_bps: 5.0

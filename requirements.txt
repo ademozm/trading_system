@@ -1,0 +1,36 @@
+# --- Katman 1: Borsa/Broker bağlantısı ---
+ccxt>=4.3.0
+requests>=2.31.0        # Alpaca konnektörü için (hisse senedi verisi)
+
+# --- Katman 2: Veri depolama ---
+pandas>=2.2.0
+pyarrow>=16.0.0        # Parquet okuma/yazma
+duckdb>=0.10.0
+
+# --- Katman 3a: Klasik göstergeler / backtest motoru ---
+backtrader>=1.9.78.123
+TA-Lib>=0.4.28          # Not: sistem paketi olarak ta-lib C kütüphanesi de gerekir
+
+# --- Katman 3b: ML sinyali (Faz 3) ---
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
+joblib>=1.4.0
+
+# --- Katman 3c: LLM ajan zinciri (Faz 4) ---
+langgraph>=0.1.0          # opsiyonel — sadece _build_langgraph_app() kullanılırsa gerekir
+langchain>=0.2.0          # opsiyonel
+openai>=1.30.0             # provider="openai" için (OpenAI, DeepSeek, Ollama vb. OpenAI-uyumlu her endpoint)
+anthropic>=0.28.0          # provider="anthropic" için (Claude modelleri)
+
+# --- Katman 4: Risk/mandate şeması ---
+pydantic>=2.7.0
+PyYAML>=6.0.1
+
+# --- Katman 6/8: Telegram onay akışı ---
+python-telegram-bot>=21.0
+
+# --- Katman 7: İzleme ---
+python-dotenv>=1.0.0
+
+# --- Test ---
+pytest>=8.0.0

@@ -85,8 +85,15 @@ dosyalarda `python -m py_compile` ile doğrulandı.
 
 2. **Backtest çalıştır:**
    ```bash
-   python -m backtest.run_backtest --data data/ohlcv/BTC_USDT_1h.parquet --strategy sma_cross
+   python -m backtest.run_backtest --data data/ohlcv/BTC_USDT_1h.parquet
    ```
+   **Düzeltilen bir hata:** İlk sürümde bir "sizer" (pozisyon boyutlandırıcı)
+   tanımlı değildi — backtrader varsayılan olarak "1 TAM birim al" davranışı
+   sergiliyordu. BTC gibi yüksek fiyatlı varlıklarda ($60-90k) bu, küçük bir
+   `--cash` ile karşılanamaz ve emir SESSİZCE reddedilir (0 işlem, 0 getiri,
+   hiçbir hata mesajı yok). Artık `--cash-pct` (varsayılan `%95`) ile her
+   emir sermayenin bir yüzdesi olarak boyutlandırılıyor. **0 işlem görürseniz**
+   önce `--cash-pct` değerini kontrol edin.
 
 3. **Mandate'i düzenle:** `config/mandate.yaml` içinde maksimum pozisyon boyutu,
    maksimum toplam maruziyet, günlük kayıp tavanı gibi sınırları kendinize göre ayarlayın.
@@ -144,6 +151,28 @@ dosyalarda `python -m py_compile` ile doğrulandı.
   kesin bir tahmin değil. Gerçek zamanlı order book akışı (ccxt.pro/
   WebSocket) ve canlı emir döngüsü hâlâ bağlanmadı — `market_making.enabled:
   false` varsayılanı bilinçlidir, canlıya almadan önce testnet'te doğrulayın.
+
+  **Düzeltilen kritik bir hata:** İlk sürümde nakit/marj kısıtı YOKTU —
+  `max_inventory` varlık fiyatına göre çok büyük seçildiğinde (ör. BTC gibi
+  yüksek fiyatlı bir varlıkta küçük sermayeyle büyük bir limit), simülasyon
+  sessizce sınırsız kaldıraçla işlem yapıyor ve %-100'ün altına inen
+  (gerçekte imkansız) getiri/drawdown üretiyordu. Artık **cash-secured**
+  (nakit ile tam karşılanan, kaldıraçsız) varsayımı zorunlu: nakit
+  yetmediğinde ALIŞ fill'i gerçekleşmez, `result.skipped_due_to_cash`
+  sayacında görünür. `tests/test_mm_backtest.py` içinde bunu doğrulayan
+  2 regresyon testi var.
+
+  **Metodolojik not (kod hatası değil, veri granülaritesi meselesi):**
+  Market making, doğası gereği saniyeler/dakikalar ölçeğinde çalışır.
+  1 saatlik bar ile backtest yaparsanız "bu saat içinde HERHANGİ bir anda
+  fiyat kotasyonuma değdi mi" sorusuna bakılır — bu, dar bir spread için
+  neredeyse her zaman "evet" demek, yani gerçekte olmayacak kadar sık fill
+  görürsünüz. Market making backtest'i için `--timeframe 1m` (veya daha
+  küçük) ile veri çekmeniz, sonuçların anlamlılığı açısından önemlidir:
+  ```bash
+  python -m data_layer.connectors.ccxt_connector --exchange binance --symbol BTC/USDT --timeframe 1m --days 30
+  python -m backtest.run_mm_backtest --data data/ohlcv/BTC_USDT_1m.parquet
+  ```
 - **Faz 5 — Küçük sermaye ile canlı test:** Bu bir kod aşaması değil,
   operasyonel bir aşamadır. Sırasıyla: (1) tüm testleri kendi makinenizde
   çalıştırın, (2) `dry_run=True` ile paper-trading modunda en az birkaç

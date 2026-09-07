@@ -9,7 +9,10 @@ duckdb>=0.10.0
 
 # --- Katman 3a: Klasik göstergeler / backtest motoru ---
 backtrader>=1.9.78.123
-TA-Lib>=0.4.28          # Not: sistem paketi olarak ta-lib C kütüphanesi de gerekir
+# Not: TA-Lib bilinçli olarak KULLANILMIYOR — signals/ml/features.py tüm
+# göstergeleri (RSI dahil) saf pandas ile hesaplıyor. TA-Lib'in Python
+# paketi bir C kütüphanesi gerektirdiği için (ayrı sistem kurulumu ister)
+# kurulum sürtünmesini azaltmak için bilinçli olarak buradan çıkarıldı.
 
 # --- Katman 3b: ML sinyali (Faz 3) ---
 scikit-learn>=1.4.0

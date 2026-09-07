@@ -18,6 +18,18 @@ FILL VARSAYIMI (basitleştirme — açıkça belirtiliyor):
       - Latency (emrinizin borsaya ulaşma süresi)
     Bu yüzden buradaki sonuçlar GERÇEK canlı performansın bir ÜST SINIRI
     (iyimser tahmini) olarak okunmalıdır, kesin bir tahmin değil.
+
+NAKİT KISITI (kritik düzeltme — gerçek bir hataydı, önceki sürümde yoktu):
+    Bu simülasyon CASH-SECURED (nakit ile tam karşılanan, kaldıraçsız spot)
+    bir hesap varsayar — tıpkı execution/order_router.py'nin kripto tarafında
+    kaldıraçlı emri açıkça reddetmesi gibi. Bir ALIŞ, ancak mevcut nakit
+    bunu karşılıyorsa gerçekleşir; karşılamıyorsa o fill ATLANIR (sessizce
+    kaydedilmez, `skipped_due_to_cash` sayacında görünür). Bu kısıt
+    OLMADAN, `max_inventory` gibi parametreler yanlış kalibre edildiğinde
+    (ör. yüksek fiyatlı bir varlıkta düşük sermayeyle çok büyük bir
+    envanter limiti) simülasyon SESSİZCE sınırsız kaldıraçla işlem yapar
+    ve %-100'ün altına inen (gerçekte imkansız) drawdown/getiri değerleri
+    üretir.
 """
 
 from __future__ import annotations
@@ -41,6 +53,7 @@ class FillEvent:
 class MMBacktestResult:
     equity_curve: pd.DataFrame  # sütunlar: timestamp, cash, inventory, mid_price, equity
     fills: list[FillEvent] = field(default_factory=list)
+    skipped_due_to_cash: int = 0  # nakit yetersizliği nedeniyle atlanan ALIŞ fill sayısı
 
     @property
     def total_return_pct(self) -> float:
@@ -88,8 +101,16 @@ def run_mm_backtest(
          (bir önceki `volatility_lookback` bar'ın getiri std sapmasını
          sigma olarak kullanarak).
       2) Kotasyonun BİR SONRAKİ barda dolup dolmadığını kontrol et (yukarıdaki
-         fill varsayımıyla).
+         fill varsayımıyla) — ALIŞ için ayrıca nakit yeterli mi kontrol edilir.
       3) Nakit/envanteri güncelle, mark-to-market equity hesapla.
+
+    UYARI: `config.max_inventory` ile `initial_cash` uyumsuz seçilirse
+    (ör. yüksek fiyatlı bir varlıkta küçük sermayeyle büyük bir envanter
+    limiti), nakit kısıtı devreye girer ve stratejiniz sık sık
+    `skipped_due_to_cash` ile karşılaşır — bu bir hata değil, sermayenizin
+    o envanter limitini kaldıramadığının göstergesidir. `max_inventory`'yi
+    `initial_cash`'e göre küçültün (kural of thumb: max_inventory * varlık
+    fiyatı, initial_cash'in küçük bir katından fazla olmamalı).
     """
     if len(df) < volatility_lookback + 2:
         raise ValueError(
@@ -103,6 +124,7 @@ def run_mm_backtest(
     cash = initial_cash
     fills: list[FillEvent] = []
     equity_rows: list[dict] = []
+    skipped_due_to_cash = 0
 
     n = len(df)
     for i in range(volatility_lookback, n - 1):
@@ -128,9 +150,17 @@ def run_mm_backtest(
         quote = strategy.generate_quote(mid_price=mid_price, sigma=sigma, time_remaining=1.0)
 
         if quote.bid_price is not None and next_low <= quote.bid_price:
-            strategy.update_inventory(quote.bid_size, side="buy")
-            cash -= quote.bid_price * quote.bid_size
-            fills.append(FillEvent(next_timestamp, "buy", quote.bid_price, quote.bid_size))
+            buy_cost = quote.bid_price * quote.bid_size
+            if cash >= buy_cost:
+                strategy.update_inventory(quote.bid_size, side="buy")
+                cash -= buy_cost
+                fills.append(FillEvent(next_timestamp, "buy", quote.bid_price, quote.bid_size))
+            else:
+                # Nakit yetersiz -> cash-secured (kaldıraçsız) varsayımı
+                # gereği bu fill GERÇEKLEŞMEZ. Gerçek bir spot hesapta da
+                # aynen böyle olurdu: borsa bakiyeniz yetmeyen bir emri kabul
+                # etmez.
+                skipped_due_to_cash += 1
 
         if quote.ask_price is not None and next_high >= quote.ask_price:
             strategy.update_inventory(quote.ask_size, side="sell")
@@ -148,4 +178,5 @@ def run_mm_backtest(
         )
 
     equity_curve = pd.DataFrame(equity_rows)
-    return MMBacktestResult(equity_curve=equity_curve, fills=fills)
+    return MMBacktestResult(equity_curve=equity_curve, fills=fills, skipped_due_to_cash=skipped_due_to_cash)
+

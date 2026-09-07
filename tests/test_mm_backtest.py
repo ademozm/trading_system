@@ -81,3 +81,26 @@ def test_total_return_and_drawdown_are_computed() -> None:
     # Sadece hesaplanabilir ve mantıklı bir aralıkta olduğunu doğrula
     assert isinstance(result.total_return_pct, float)
     assert result.max_drawdown_pct <= 0.0  # drawdown her zaman <= 0 olmalı
+
+
+def test_cash_secured_buys_never_push_cash_negative() -> None:
+    """
+    KRİTİK REGRESYON TESTİ: Bu test, önceki sürümde bulunan gerçek bir
+    hatayı önlemek için eklendi — nakit kısıtı olmadan simülasyon
+    sınırsız kaldıraçla işlem yapıyor ve imkansız (%-100'ün altında)
+    getiri/drawdown değerleri üretiyordu. Küçük bir initial_cash ve
+    büyük bir max_inventory ile bu senaryoyu bilerek tetikliyoruz.
+    """
+    df = _make_flat_then_spike_df(n=150)
+    config = MarketMakingConfig(order_size=0.5, max_inventory=10.0)  # bilerek aşırı büyük
+    result = run_mm_backtest(df, config, volatility_lookback=20, initial_cash=100.0)  # bilerek küçük
+    assert (result.equity_curve["cash"] >= 0).all(), "Cash-secured varsayımı gereği nakit ASLA negatif olmamalı"
+    assert result.skipped_due_to_cash > 0, "Bu senaryoda nakit yetersizliği nedeniyle atlanan fill OLMALI"
+
+
+def test_ample_cash_means_no_skipped_fills() -> None:
+    # Nakit bol olduğunda, sınır sadece envanter limitinden gelmeli
+    df = _make_flat_then_spike_df(n=100)
+    config = MarketMakingConfig(order_size=0.1, max_inventory=1.0)
+    result = run_mm_backtest(df, config, volatility_lookback=20, initial_cash=1_000_000.0)
+    assert result.skipped_due_to_cash == 0

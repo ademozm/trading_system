@@ -30,7 +30,7 @@ def load_dataframe_as_feed(parquet_path: str) -> bt.feeds.PandasData:
     return bt.feeds.PandasData(dataname=df)
 
 
-def run(data_path: str, fast_period: int, slow_period: int, cash: float) -> None:
+def run(data_path: str, fast_period: int, slow_period: int, cash: float, cash_pct: float) -> None:
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(cash)
 
@@ -38,6 +38,14 @@ def run(data_path: str, fast_period: int, slow_period: int, cash: float) -> None
     cerebro.adddata(data_feed)
 
     cerebro.addstrategy(SmaCrossStrategy, fast_period=fast_period, slow_period=slow_period)
+
+    # KRİTİK DÜZELTME: Varsayılan backtrader sizer'ı (stake=1) "1 TAM birim al"
+    # demektir — BTC gibi yüksek fiyatlı varlıklarda ($60-90k) bu, $10.000'lik
+    # sermayeyle karşılanamaz ve emir SESSİZCE reddedilir (0 işlem, 0 getiri
+    # görürsünüz ama hiçbir hata mesajı almazsınız). PercentSizer, her emri
+    # mevcut sermayenin bir yüzdesi olarak boyutlandırır — bu, risk_manager'ın
+    # zaten kullandığı "portföyün yüzdesi" modeliyle de tutarlıdır.
+    cerebro.addsizer(bt.sizers.PercentSizer, percents=cash_pct)
 
     # Katman 5'in "robustluk testleri" bölümünde bahsedilen metrikler için
     # backtrader'ın yerleşik analyzer'ları kullanılıyor.
@@ -60,9 +68,19 @@ def run(data_path: str, fast_period: int, slow_period: int, cash: float) -> None
     drawdown = strat.analyzers.drawdown.get_analysis()
     trades = strat.analyzers.trades.get_analysis()
 
+    total_trades = trades.get("total", {}).get("total", 0)
     print(f"[run_backtest] Sharpe oranı:        {sharpe.get('sharperatio')}")
     print(f"[run_backtest] Maks. drawdown:      %{drawdown.get('max', {}).get('drawdown', 'N/A')}")
-    print(f"[run_backtest] Toplam işlem sayısı: {trades.get('total', {}).get('total', 0)}")
+    print(f"[run_backtest] Toplam işlem sayısı: {total_trades}")
+
+    if total_trades == 0:
+        print(
+            "\n[UYARI] 0 işlem gerçekleşti. Bu genellikle şu anlama gelir: "
+            "(a) --cash-pct çok düşük/varlık fiyatı çok yüksek (emirler "
+            "yetersiz bakiye nedeniyle reddediliyor), ya da (b) bu zaman "
+            "aralığında hiç SMA kesişimi olmadı. Önce --cash-pct değerini "
+            "kontrol edin."
+        )
 
     print(
         "\n[UYARI] Bu sonuçlar sadece bu geçmiş veri penceresi için geçerlidir. "
@@ -77,9 +95,13 @@ def main() -> None:
     parser.add_argument("--fast", type=int, default=10)
     parser.add_argument("--slow", type=int, default=30)
     parser.add_argument("--cash", type=float, default=10_000.0)
+    parser.add_argument(
+        "--cash-pct", type=float, default=95.0,
+        help="Her işlemde sermayenin yüzde kaçının kullanılacağı (varsayılan: %%95)",
+    )
     args = parser.parse_args()
 
-    run(args.data, args.fast, args.slow, args.cash)
+    run(args.data, args.fast, args.slow, args.cash, args.cash_pct)
 
 
 if __name__ == "__main__":

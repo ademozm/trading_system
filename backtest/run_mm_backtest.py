@@ -47,9 +47,18 @@ def main() -> None:
 
     print(f"[run_mm_backtest] Toplam bar sayısı: {len(df)}")
     print(f"[run_mm_backtest] Toplam dolan emir: {result.fill_count}")
+    print(f"[run_mm_backtest] Nakit yetersizliği nedeniyle atlanan ALIŞ: {result.skipped_due_to_cash}")
     print(f"[run_mm_backtest] Nihai envanter: {result.final_inventory:.4f}")
     print(f"[run_mm_backtest] Toplam getiri: %{result.total_return_pct:.3f}")
     print(f"[run_mm_backtest] Maks. drawdown: %{result.max_drawdown_pct:.3f}")
+
+    if result.skipped_due_to_cash > result.fill_count:
+        print(
+            "\n[UYARI] Atlanan ALIŞ sayısı, gerçekleşen fill sayısından fazla — "
+            "bu genellikle `max_inventory` * varlık fiyatının `--initial-cash`'e "
+            "göre çok büyük seçildiği anlamına gelir. --max-inventory değerini "
+            "düşürmeyi düşünün."
+        )
     print(
         "\n[UYARI] Bu sonuçlar basitleştirilmiş bir fill varsayımına dayanır "
         "(kuyruk pozisyonu, gecikme, kısmi dolma yok sayıldı). Gerçek canlı "

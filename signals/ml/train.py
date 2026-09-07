@@ -89,6 +89,10 @@ def train(
         num_class=3,
         class_weight="balanced",  # sınıflar dengesiz olabilir (çoğunlukla "0")
         random_state=42,
+        verbose=-1,  # "No further splits with positive gain" gibi binlerce
+                     # satırlık iç log gürültüsünü susturur — bu sınıfların
+                     # zayıf ayrılabilirliğinin normal bir belirtisidir, hata
+                     # değil, ama okunabilirliği bozuyor.
     )
 
     # LightGBM sınıf etiketlerinin 0..num_class-1 olmasını bekler;

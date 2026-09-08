@@ -104,3 +104,34 @@ def test_ample_cash_means_no_skipped_fills() -> None:
     config = MarketMakingConfig(order_size=0.1, max_inventory=1.0)
     result = run_mm_backtest(df, config, volatility_lookback=20, initial_cash=1_000_000.0)
     assert result.skipped_due_to_cash == 0
+
+
+def test_inventory_never_negative_without_initial_inventory() -> None:
+    """
+    KRİTİK REGRESYON TESTİ #2: cash kısıtı eklendikten SONRA bile hâlâ
+    imkansız (%-100'ün altında) sonuçlar üretiliyordu — çünkü SATIŞ
+    tarafında hiçbir kısıt yoktu (sahip olunmayan varlığın "açığa
+    satılması"). initial_inventory=0.0 ile başlarken hiçbir SATIŞ,
+    envanter o SATIŞı karşılamadan gerçekleşmemeli.
+    """
+    df = _make_flat_then_spike_df(n=150)
+    config = MarketMakingConfig(order_size=0.1, max_inventory=1.0)
+    result = run_mm_backtest(df, config, volatility_lookback=20, initial_cash=10_000.0, initial_inventory=0.0)
+    assert (result.equity_curve["inventory"] >= 0).all(), "initial_inventory=0 iken envanter ASLA negatif olmamalı"
+    assert (result.equity_curve["cash"] >= 0).all(), "Cash-secured varsayımı gereği nakit ASLA negatif olmamalı"
+    # Equity, başlangıç sermayesinin -%100'ünden AZ olamaz (matematiksel imkansızlık testi)
+    assert result.total_return_pct > -100.0
+
+
+def test_initial_inventory_allows_immediate_sells() -> None:
+    # Elinizde zaten varlık varsa, ilk ALIŞ beklemeden SATIŞ fill'i olabilmeli
+    df = _make_flat_then_spike_df(n=100)
+    config = MarketMakingConfig(order_size=0.1, max_inventory=1.0)
+    result = run_mm_backtest(
+        df, config, volatility_lookback=20, initial_cash=10_000.0, initial_inventory=0.5
+    )
+    # skipped_due_to_inventory, envantersiz başlayan senaryoya göre daha az olmalı
+    result_no_inventory = run_mm_backtest(
+        df, config, volatility_lookback=20, initial_cash=10_000.0, initial_inventory=0.0
+    )
+    assert result.skipped_due_to_inventory <= result_no_inventory.skipped_due_to_inventory

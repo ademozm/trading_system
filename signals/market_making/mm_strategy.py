@@ -64,10 +64,12 @@ class Quote:
 
 
 class MarketMakingStrategy:
-    def __init__(self, symbol: str, config: Optional[MarketMakingConfig] = None) -> None:
+    def __init__(
+        self, symbol: str, config: Optional[MarketMakingConfig] = None, initial_inventory: float = 0.0
+    ) -> None:
         self.symbol = symbol
         self.config = config or MarketMakingConfig()
-        self.inventory: float = 0.0  # dışarıdan (gerçek pozisyon güncellemelerinden) güncellenir
+        self.inventory: float = initial_inventory  # dışarıdan (gerçek pozisyon güncellemelerinden) güncellenir
 
     def update_inventory(self, filled_qty: float, side: str) -> None:
         """Bir emir dolduğunda envanteri günceller. side: 'buy' | 'sell'."""

@@ -19,17 +19,27 @@ FILL VARSAYIMI (basitleştirme — açıkça belirtiliyor):
     Bu yüzden buradaki sonuçlar GERÇEK canlı performansın bir ÜST SINIRI
     (iyimser tahmini) olarak okunmalıdır, kesin bir tahmin değil.
 
-NAKİT KISITI (kritik düzeltme — gerçek bir hataydı, önceki sürümde yoktu):
+NAKİT KISITI (kritik düzeltme #1 — gerçek bir hataydı):
     Bu simülasyon CASH-SECURED (nakit ile tam karşılanan, kaldıraçsız spot)
     bir hesap varsayar — tıpkı execution/order_router.py'nin kripto tarafında
     kaldıraçlı emri açıkça reddetmesi gibi. Bir ALIŞ, ancak mevcut nakit
     bunu karşılıyorsa gerçekleşir; karşılamıyorsa o fill ATLANIR (sessizce
-    kaydedilmez, `skipped_due_to_cash` sayacında görünür). Bu kısıt
-    OLMADAN, `max_inventory` gibi parametreler yanlış kalibre edildiğinde
-    (ör. yüksek fiyatlı bir varlıkta düşük sermayeyle çok büyük bir
-    envanter limiti) simülasyon SESSİZCE sınırsız kaldıraçla işlem yapar
-    ve %-100'ün altına inen (gerçekte imkansız) drawdown/getiri değerleri
-    üretir.
+    kaydedilmez, `skipped_due_to_cash` sayacında görünür).
+
+ENVANTER KISITI (kritik düzeltme #2 — gerçek bir hataydı, #1'den SONRA
+bulundu): İlk düzeltmeden sonra bile sonuçlar hâlâ imkansızdı (%-100'ün
+altında getiri/drawdown), çünkü SATIŞ tarafında hiçbir kısıt YOKTU — strateji
+sahip olmadığı BTC'yi "açığa satabiliyordu" (naked short), bu da marjsız bir
+spot hesapta mümkün olmayan bir şey. Artık bir SATIŞ, ancak mevcut envanter
+bunu karşılıyorsa gerçekleşir (varsayılan `initial_inventory=0.0` ile
+başlarsanız, ilk ALIŞ gerçekleşene kadar hiç SATIŞ fill'i olmaz — bu
+DOĞRUDUR, gerçek bir spot hesapta da böyle olur). Karşılamıyorsa fill
+`skipped_due_to_inventory` sayacında görünür.
+
+Bu iki kısıt birlikte şunu garanti eder: nakit ASLA negatife düşmez,
+envanter ASLA negatife düşmez — yani equity (cash + inventory*price) ASLA
+başlangıç sermayesinin -%100'ünün altına inemez (matematiksel olarak
+imkansız bir sonuç artık üretilemez).
 """
 
 from __future__ import annotations
@@ -53,7 +63,8 @@ class FillEvent:
 class MMBacktestResult:
     equity_curve: pd.DataFrame  # sütunlar: timestamp, cash, inventory, mid_price, equity
     fills: list[FillEvent] = field(default_factory=list)
-    skipped_due_to_cash: int = 0  # nakit yetersizliği nedeniyle atlanan ALIŞ fill sayısı
+    skipped_due_to_cash: int = 0       # nakit yetersizliği nedeniyle atlanan ALIŞ fill sayısı
+    skipped_due_to_inventory: int = 0  # envanter yetersizliği nedeniyle atlanan SATIŞ fill sayısı
 
     @property
     def total_return_pct(self) -> float:
@@ -89,6 +100,7 @@ def run_mm_backtest(
     config: MarketMakingConfig,
     volatility_lookback: int = 20,
     initial_cash: float = 10_000.0,
+    initial_inventory: float = 0.0,
 ) -> MMBacktestResult:
     """
     df: en az `timestamp`, `open`, `high`, `low`, `close` sütunlarını içermeli
@@ -111,6 +123,11 @@ def run_mm_backtest(
     o envanter limitini kaldıramadığının göstergesidir. `max_inventory`'yi
     `initial_cash`'e göre küçültün (kural of thumb: max_inventory * varlık
     fiyatı, initial_cash'in küçük bir katından fazla olmamalı).
+
+    NOT: `initial_inventory=0.0` (varsayılan) ile başlarsanız, İLK ALIŞ
+    gerçekleşene kadar hiçbir SATIŞ fill'i olmaz — bu DOĞRUDUR (elinizde
+    satacak bir şey yok). Zaten elinizde bir miktar varlık varmış gibi
+    başlamak isterseniz `initial_inventory` parametresini kullanın.
     """
     if len(df) < volatility_lookback + 2:
         raise ValueError(
@@ -120,11 +137,12 @@ def run_mm_backtest(
     returns = df["close"].pct_change()
     rolling_sigma = returns.rolling(window=volatility_lookback).std()
 
-    strategy = MarketMakingStrategy(symbol="BACKTEST", config=config)
+    strategy = MarketMakingStrategy(symbol="BACKTEST", config=config, initial_inventory=initial_inventory)
     cash = initial_cash
     fills: list[FillEvent] = []
     equity_rows: list[dict] = []
     skipped_due_to_cash = 0
+    skipped_due_to_inventory = 0
 
     n = len(df)
     for i in range(volatility_lookback, n - 1):
@@ -163,9 +181,15 @@ def run_mm_backtest(
                 skipped_due_to_cash += 1
 
         if quote.ask_price is not None and next_high >= quote.ask_price:
-            strategy.update_inventory(quote.ask_size, side="sell")
-            cash += quote.ask_price * quote.ask_size
-            fills.append(FillEvent(next_timestamp, "sell", quote.ask_price, quote.ask_size))
+            if strategy.inventory >= quote.ask_size:
+                strategy.update_inventory(quote.ask_size, side="sell")
+                cash += quote.ask_price * quote.ask_size
+                fills.append(FillEvent(next_timestamp, "sell", quote.ask_price, quote.ask_size))
+            else:
+                # Envanter yetersiz -> spot (marjsız) varsayımı gereği "açığa
+                # satış" YAPILMAZ. Gerçek bir spot hesapta da sahip olmadığınız
+                # bir varlığı satamazsınız.
+                skipped_due_to_inventory += 1
 
         equity_rows.append(
             {
@@ -178,5 +202,10 @@ def run_mm_backtest(
         )
 
     equity_curve = pd.DataFrame(equity_rows)
-    return MMBacktestResult(equity_curve=equity_curve, fills=fills, skipped_due_to_cash=skipped_due_to_cash)
+    return MMBacktestResult(
+        equity_curve=equity_curve,
+        fills=fills,
+        skipped_due_to_cash=skipped_due_to_cash,
+        skipped_due_to_inventory=skipped_due_to_inventory,
+    )
 

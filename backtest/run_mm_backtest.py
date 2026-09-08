@@ -26,6 +26,11 @@ def main() -> None:
     parser.add_argument("--order-size", type=float, default=0.1)
     parser.add_argument("--volatility-lookback", type=int, default=20)
     parser.add_argument("--initial-cash", type=float, default=10_000.0)
+    parser.add_argument(
+        "--initial-inventory", type=float, default=0.0,
+        help="Başlangıçta elinizde varsayılan varlık miktarı (varsayılan: 0.0 — "
+             "ilk ALIŞ gerçekleşene kadar hiç SATIŞ olmaz, bu normaldir)",
+    )
     args = parser.parse_args()
 
     df = pd.read_parquet(args.data)
@@ -43,11 +48,13 @@ def main() -> None:
         df, config,
         volatility_lookback=args.volatility_lookback,
         initial_cash=args.initial_cash,
+        initial_inventory=args.initial_inventory,
     )
 
     print(f"[run_mm_backtest] Toplam bar sayısı: {len(df)}")
     print(f"[run_mm_backtest] Toplam dolan emir: {result.fill_count}")
     print(f"[run_mm_backtest] Nakit yetersizliği nedeniyle atlanan ALIŞ: {result.skipped_due_to_cash}")
+    print(f"[run_mm_backtest] Envanter yetersizliği nedeniyle atlanan SATIŞ: {result.skipped_due_to_inventory}")
     print(f"[run_mm_backtest] Nihai envanter: {result.final_inventory:.4f}")
     print(f"[run_mm_backtest] Toplam getiri: %{result.total_return_pct:.3f}")
     print(f"[run_mm_backtest] Maks. drawdown: %{result.max_drawdown_pct:.3f}")

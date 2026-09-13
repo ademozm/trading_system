@@ -44,9 +44,17 @@ kill_switch_file: "STOP_TRADING"
 approval_timeout_seconds: 300
 
 # Varlık sınıfına göre farklı kurallar tanımlamak isterseniz (opsiyonel)
+#
+# ÖNEMLİ: execution/order_router.py şu an SADECE spot (kaldıraçsız) ccxt
+# emirlerini destekliyor — leverage > 1.0 olan bir işlem risk_manager
+# tarafından onaylansa bile order_router'da bilinçli olarak REDDEDİLİR
+# (futures/margin execution henüz uygulanmadı). Bu yüzden crypto için
+# max_leverage burada 1.0'ın üzerine çıkarılmamalı — aksi halde risk
+# katmanının onayladığı bir işlem execution'da patlar. Kaldıraçlı emir
+# desteği eklendiğinde bu değer güvenle artırılabilir.
 per_asset_class:
   crypto:
-    max_leverage: 3.0
+    max_leverage: 1.0
   equity:
     max_leverage: 1.0
 

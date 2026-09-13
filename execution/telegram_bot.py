@@ -9,14 +9,22 @@ Akış:
   5) mandate.approval_timeout_seconds içinde yanıt gelmezse taslak
      otomatik reddedilir (varsayılan = işlem YAPMA).
 
-Kurulum:
-  - Ortam değişkenleri: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-    (BotFather'dan token, kendi chat_id'nizi @userinfobot ile alabilirsiniz)
-  - `pip install python-telegram-bot`
+KRİTİK DÜZELTME #1: Önceki sürümde `request_approval()` mesajı gönderip
+`asyncio.sleep()` ile bekliyordu ama botun Telegram'dan gelen güncellemeleri
+(buton tıklamalarını) DİNLEMESİNİ hiç başlatmıyordu (`start_polling()` /
+`run_polling()` çağrılmıyordu). Sonuç: mesaj gidiyordu ama buton tıklamaları
+asla işlenmiyordu. Artık `start()`/`stop()` ile polling açıkça başlatılıp
+durduruluyor, `on_decision` artık __init__'te değil her `request_approval()`
+çağrısında ayrı ayrı veriliyor (tek bir bot örneği, birden çok istek için
+paylaşılabilsin diye — bkz. main.py'deki kullanım).
 
-Not: Bu dosya bir İSKELETTİR — gerçek çalıştırma için kendi ortamınızda
-python-telegram-bot kurulu olmalı (bu sohbet ortamında ağ erişimi
-olmadığı için kurulup uçtan uca test edilemedi; sözdizimi doğrulanmıştır).
+KRİTİK DÜZELTME #2 (#1'den SONRA bulundu): Polling düzeltildikten sonra bile
+`request_approval()` her zaman TAM `timeout_seconds` kadar bekliyordu —
+kullanıcı butona hemen bassa bile fonksiyon erken dönmüyordu, bu da
+main.py'deki döngünün bir sonraki sembole geçmesini (ve o sembolün Telegram
+mesajını göndermesini) gereksiz yere geciktiriyordu. Artık bir `asyncio.Event`
+ile karar geldiği AN bekleme kesiliyor; zaman aşımı sadece hiç yanıt
+gelmezse devreye giriyor.
 """
 
 from __future__ import annotations
@@ -24,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, Optional
 
 from risk.risk_manager import ApprovedOrderDraft
@@ -39,26 +47,32 @@ except ImportError:  # pragma: no cover
     Application = CallbackQueryHandler = CommandHandler = ContextTypes = None  # type: ignore
 
 
+# Onay sonucu geldiğinde çağrılacak fonksiyonun tipi
+OnDecision = Callable[[str, ApprovedOrderDraft, bool], Awaitable[None]]
+
+
 @dataclass
 class PendingApproval:
     draft: ApprovedOrderDraft
+    on_decision: OnDecision  # bu isteğe ÖZEL callback (her request_approval çağrısı kendi callback'ini verir)
     approved: Optional[bool] = None  # None = henüz yanıt yok
-
-
-# Onay sonucu geldiğinde çağrılacak fonksiyonun tipi
-OnDecision = Callable[[str, ApprovedOrderDraft, bool], Awaitable[None]]
+    event: asyncio.Event = field(default_factory=asyncio.Event)  # karar gelince set edilir -> bekleme hemen biter
 
 
 class ApprovalBot:
     """
     Telegram üzerinden onay/red akışını yöneten sınıf.
 
-    Kullanım (main.py içinde):
-        bot = ApprovalBot(on_decision=my_order_router_callback)
-        await bot.request_approval(draft)
+    Kullanım (main.py içinde) — TEK bir örnek oluşturup tüm semboller için
+    paylaşın, her sembol için yeni bir ApprovalBot AÇMAYIN:
+        bot = ApprovalBot()
+        await bot.start()                       # polling'i başlat
+        await bot.request_approval(draft, on_decision=my_callback)
+        ...                                       # başka semboller için de aynı bot
+        await bot.stop()                          # program biterken kapat
     """
 
-    def __init__(self, on_decision: OnDecision, timeout_seconds: int = 300) -> None:
+    def __init__(self, timeout_seconds: int = 300) -> None:
         token = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.chat_id = os.environ.get("TELEGRAM_CHAT_ID")
         if not token or not self.chat_id:
@@ -70,17 +84,50 @@ class ApprovalBot:
             raise ImportError("python-telegram-bot kurulu değil: `pip install python-telegram-bot`")
 
         self.timeout_seconds = timeout_seconds
-        self.on_decision = on_decision
         self._pending: Dict[str, PendingApproval] = {}
+        self._started = False
 
         self.app = Application.builder().token(token).build()
         self.app.add_handler(CallbackQueryHandler(self._handle_callback))
         self.app.add_handler(CommandHandler("durum", self._handle_status))
 
-    async def request_approval(self, draft: ApprovedOrderDraft) -> None:
-        """Yeni bir işlem taslağını Telegram'a gönderir ve yanıt bekler."""
+    async def start(self) -> None:
+        """
+        Botun Telegram'dan güncelleme (buton tıklaması) ALMASINI başlatır.
+        request_approval() çağırmadan ÖNCE bu MUTLAKA çağrılmalı — aksi
+        halde mesaj gider ama buton tıklamaları asla işlenmez (düzeltilen
+        hata tam olarak buydu).
+        """
+        if self._started:
+            return
+        await self.app.initialize()
+        await self.app.start()
+        await self.app.updater.start_polling()
+        self._started = True
+
+    async def stop(self) -> None:
+        """Programı düzgünce kapatmak için polling'i durdurur."""
+        if not self._started:
+            return
+        await self.app.updater.stop()
+        await self.app.stop()
+        await self.app.shutdown()
+        self._started = False
+
+    async def request_approval(self, draft: ApprovedOrderDraft, on_decision: OnDecision) -> None:
+        """
+        Yeni bir işlem taslağını Telegram'a gönderir ve yanıt bekler.
+        `start()` önceden çağrılmamışsa RuntimeError fırlatır (sessizce
+        "mesaj gitti ama hiç dinlenmiyor" durumuna düşülmesin diye).
+        """
+        if not self._started:
+            raise RuntimeError(
+                "ApprovalBot.start() çağrılmadan request_approval() kullanılamaz — "
+                "aksi halde buton tıklamaları asla işlenmez. Önce `await bot.start()` çağırın."
+            )
+
         request_id = str(uuid.uuid4())[:8]
-        self._pending[request_id] = PendingApproval(draft=draft)
+        self._pending[request_id] = PendingApproval(draft=draft, on_decision=on_decision)
 
         text = (
             f"🔔 *Yeni İşlem Önerisi* (#{request_id})\n\n"
@@ -104,16 +151,20 @@ class ApprovalBot:
             chat_id=self.chat_id, text=text, parse_mode="Markdown", reply_markup=keyboard
         )
 
-        # Zaman aşımını bekle
-        await asyncio.sleep(self.timeout_seconds)
-        pending = self._pending.get(request_id)
-        if pending and pending.approved is None:
-            await self.on_decision(request_id, draft, False)
-            await self.app.bot.send_message(
-                chat_id=self.chat_id,
-                text=f"⌛ #{request_id} zaman aşımına uğradı, otomatik REDDEDİLDİ.",
-            )
-            del self._pending[request_id]
+        # Karar (onay/red) gelene KADAR bekle, ama en fazla timeout_seconds
+        # kadar. Event set edilirse (buton tıklanırsa) hemen döner —
+        # önceki hatadaki gibi gereksiz yere tam süre beklemez.
+        pending = self._pending[request_id]
+        try:
+            await asyncio.wait_for(pending.event.wait(), timeout=self.timeout_seconds)
+        except asyncio.TimeoutError:
+            if pending.approved is None:
+                await pending.on_decision(request_id, draft, False)
+                await self.app.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=f"⌛ #{request_id} zaman aşımına uğradı, otomatik REDDEDİLDİ.",
+                )
+        self._pending.pop(request_id, None)
 
     async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -126,11 +177,11 @@ class ApprovalBot:
 
         approved = action == "approve"
         pending.approved = approved
-        await self.on_decision(request_id, pending.draft, approved)
+        pending.event.set()  # request_approval()'daki beklemeyi hemen sonlandırır
+        await pending.on_decision(request_id, pending.draft, approved)
 
         status = "✅ ONAYLANDI" if approved else "❌ REDDEDİLDİ"
         await query.edit_message_text(f"{query.message.text}\n\n— {status} —")
-        del self._pending[request_id]
 
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._pending:
@@ -140,19 +191,21 @@ class ApprovalBot:
         await update.message.reply_text("Bekleyen öneriler:\n" + "\n".join(lines))
 
     def run_polling(self) -> None:
-        """Botu başlatır (bloklayıcı çağrı)."""
+        """
+        Botu bağımsız (standalone) test modunda başlatır (bloklayıcı çağrı).
+        Bu, start()/stop() ile programatik kontrolden FARKLI bir kullanım
+        şeklidir — sadece `python -m execution.telegram_bot` ile manuel
+        bağlantı testi için kullanılır, gerçek onay isteği göndermez.
+        """
         self.app.run_polling()
 
 
-async def _example_on_decision(request_id: str, draft: ApprovedOrderDraft, approved: bool) -> None:
-    """main.py içinde gerçek order_router.route_order() ile değiştirilecek örnek callback."""
-    if approved:
-        print(f"[telegram_bot] #{request_id} onaylandı -> order_router'a gönderiliyor: {draft}")
-    else:
-        print(f"[telegram_bot] #{request_id} reddedildi/zaman aşımı: {draft}")
-
-
 if __name__ == "__main__":
-    bot = ApprovalBot(on_decision=_example_on_decision)
-    print("[telegram_bot] Bot başlatılıyor... (Ctrl+C ile durdurun)")
+    from dotenv import load_dotenv
+
+    load_dotenv()  # bağımsız çalıştırıldığında (`python -m execution.telegram_bot`)
+                    # .env dosyasını yükle — main.py üzerinden çalıştırılırken zaten
+                    # main.py'nin başındaki load_dotenv() yeterli.
+    bot = ApprovalBot()
+    print("[telegram_bot] Bot başlatılıyor... (Ctrl+C ile durdurun, /durum yazarak test edin)")
     bot.run_polling()

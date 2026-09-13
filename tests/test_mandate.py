@@ -145,3 +145,63 @@ def test_risk_manager_respects_symbol_cooldown(tmp_path: Path) -> None:
     result = rm.check(trade)
     assert not result.approved
     assert result.rejection_reason == RejectionReason.SYMBOL_COOLDOWN
+
+
+def test_record_position_opened_increases_exposure(tmp_path: Path) -> None:
+    """
+    KRİTİK REGRESYON TESTİ: main.py'de bir süre bu çağrı hiç yapılmıyordu —
+    bu da aynı çalıştırma içinde onaylanan işlemlerin toplam maruziyete
+    hiç yansımamasına yol açıyordu (her kontrol "temiz sayfa" görüyordu).
+    """
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    assert rm.current_total_exposure_pct == 0.0
+
+    rm.record_position_opened(0.02)
+    assert rm.current_total_exposure_pct == 0.02
+
+    rm.record_position_opened(0.015)
+    assert abs(rm.current_total_exposure_pct - 0.035) < 1e-9
+
+
+def test_exposure_accumulates_across_multiple_approvals_in_same_run(tmp_path: Path) -> None:
+    """
+    Tam senaryo: max_total_exposure_pct=0.30 iken art arda onaylanan
+    işlemler, toplam limit aşıldığında GERÇEKTEN reddedilmeli — önceki
+    hatada bu asla gerçekleşmiyordu çünkü exposure hiç birikmiyordu.
+    """
+    rm = _make_risk_manager(base_path=str(tmp_path))  # mandate: max_total_exposure_pct=0.30
+
+    # Sırayla yüksek pozisyon boyutlu 20 "onay" simüle et (her biri max_position_size_pct
+    # sınırına çarpar: %2 * confidence=1.0 = %2), 15 onaydan sonra limit (%30) dolmalı.
+    approvals = 0
+    for _ in range(20):
+        trade = CandidateTrade(
+            symbol="BTC/USDT", side="long", asset_class="crypto",
+            confidence=1.0, rationale="test",
+        )
+        result = rm.check(trade)
+        if result.approved:
+            rm.record_position_opened(result.order_draft.position_size_pct)
+            approvals += 1
+        else:
+            assert result.rejection_reason == RejectionReason.EXPOSURE_LIMIT_HIT
+            break
+
+    assert approvals == 15, f"Beklenen 15 onay (%30 / %2), gerçekleşen: {approvals}"
+    assert rm.current_total_exposure_pct <= rm.mandate.max_total_exposure_pct + 1e-9
+
+
+def test_record_position_closed_decreases_exposure_and_updates_pnl(tmp_path: Path) -> None:
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    rm.record_position_opened(0.02)
+    rm.record_position_closed(0.02, realized_pnl_pct=-0.005)
+
+    assert rm.current_total_exposure_pct == 0.0
+    assert rm.current_daily_pnl_pct == -0.005
+
+
+def test_record_position_closed_exposure_never_goes_negative(tmp_path: Path) -> None:
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    # Hiç pozisyon açılmamışken "kapatma" çağrılırsa exposure negatife düşmemeli
+    rm.record_position_closed(0.05, realized_pnl_pct=0.01)
+    assert rm.current_total_exposure_pct == 0.0

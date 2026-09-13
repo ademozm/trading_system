@@ -23,6 +23,12 @@ import asyncio
 import logging
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()  # .env dosyasını (varsa) ortam değişkenlerine yükler — TELEGRAM_BOT_TOKEN,
+                # TELEGRAM_CHAT_ID, LLM_PROVIDER gibi değerler .env'den okunabilsin diye.
+                # `python -m main` çalıştırılan dizindeki .env dosyasını arar.
+
 from execution.order_router import OrderRouter
 from execution.telegram_bot import ApprovalBot
 from monitoring.decision_log import DecisionLog, DecisionRecord
@@ -60,6 +66,7 @@ async def process_symbol(
     decision_log: DecisionLog,
     ml_generator: MLSignalGenerator,
     llm_chain: LLMAgentChain,
+    approval_bot: ApprovalBot,
     account_equity: float,
 ) -> None:
     asset_class = infer_asset_class(symbol)
@@ -120,15 +127,17 @@ async def process_symbol(
         )
         if approved:
             order_router.route_order(approved_draft, account_equity)
+            # KRİTİK: Bu satır olmadan aynı çalıştırma içinde onaylanan
+            # işlemler toplam maruziyete YANSIMAZ — bir sonraki sembol
+            # kontrolü sanki hiçbir pozisyon açılmamış gibi değerlendirilir.
+            risk_manager.record_position_opened(approved_draft.position_size_pct)
         else:
             logger.info("Kullanıcı işlemi reddetti veya zaman aşımı: %s", approved_draft.symbol)
 
-    # Not: Her sembol için ayrı bir ApprovalBot örneği oluşturmak,
-    # gerçek kullanımda gereksiz Telegram bağlantısı açar. Üretimde
-    # tek bir ApprovalBot örneği kurup process_symbol'e parametre
-    # olarak geçirin; burada akışın netliği için basit tutuldu.
-    approval_bot = ApprovalBot(on_decision=on_decision)
-    await approval_bot.request_approval(draft)
+    # Not: approval_bot main() içinde BİR KEZ oluşturulup start() ile
+    # dinlemeye başlatılıyor, tüm semboller arasında paylaşılıyor —
+    # her sembol için yeni bir bot/bağlantı AÇILMIYOR.
+    await approval_bot.request_approval(draft, on_decision=on_decision)
 
 
 async def main() -> None:
@@ -159,18 +168,30 @@ async def main() -> None:
     )
     llm_chain = LLMAgentChain(llm_client=llm_client, decision_log=decision_log)
 
-    for symbol in mandate.symbol_universe:
-        await process_symbol(
-            symbol=symbol,
-            timeframe="1h",
-            aggregator=aggregator,
-            risk_manager=risk_manager,
-            order_router=order_router,
-            decision_log=decision_log,
-            ml_generator=ml_generator,
-            llm_chain=llm_chain,
-            account_equity=10_000.0,  # TODO: gerçek hesap bakiyesinden oku
-        )
+    # ApprovalBot TEK SEFER oluşturulur ve start() ile Telegram'dan gelen
+    # buton tıklamalarını dinlemeye başlar. Bu adım olmadan (start() çağrılmadan)
+    # mesajlar gider ama hiçbir buton tıklaması işlenmez (bkz. telegram_bot.py
+    # başındaki "KRİTİK DÜZELTME" notu).
+    approval_bot = ApprovalBot(timeout_seconds=mandate.approval_timeout_seconds)
+    await approval_bot.start()
+
+    try:
+        for symbol in mandate.symbol_universe:
+            await process_symbol(
+                symbol=symbol,
+                timeframe="1h",
+                aggregator=aggregator,
+                risk_manager=risk_manager,
+                order_router=order_router,
+                decision_log=decision_log,
+                ml_generator=ml_generator,
+                llm_chain=llm_chain,
+                approval_bot=approval_bot,
+                account_equity=10_000.0,  # TODO: gerçek hesap bakiyesinden oku
+            )
+    finally:
+        # Program hata ile de bitse, polling düzgünce kapatılmalı.
+        await approval_bot.stop()
 
 
 if __name__ == "__main__":

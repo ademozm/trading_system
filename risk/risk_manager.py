@@ -127,3 +127,27 @@ class RiskManager:
             rationale=trade.rationale,
         )
         return RiskCheckResult(True, order_draft=draft)
+
+    def record_position_opened(self, position_size_pct: float) -> None:
+        """
+        KRİTİK: Onaylanan bir taslak GERÇEKTEN yerleştirildikten (insan onayı +
+        order_router.route_order() başarılı olduktan) SONRA çağrılmalıdır.
+
+        Bunu çağırmazsanız (main.py'de olduğu gibi bir süre çağrılmıyordu),
+        `current_total_exposure_pct` hep sabit kalır ve aynı çalıştırma
+        (run) içinde art arda onaylanan işlemler toplam maruziyet limitini
+        sessizce aşabilir — her kontrol, sanki önceki onaylar hiç
+        gerçekleşmemiş gibi "temiz sayfa" görür.
+        """
+        self.current_total_exposure_pct += position_size_pct
+
+    def record_position_closed(self, position_size_pct: float, realized_pnl_pct: float) -> None:
+        """
+        Bir pozisyon kapandığında hem maruziyeti azaltır hem günlük PnL'i
+        günceller. NOT: main.py şu an pozisyon kapanışlarını TAKİP ETMİYOR
+        (Faz 5'in bir parçası — gerçek bir pozisyon izleyici/monitor
+        gerektirir). Bu metod, o bileşen eklendiğinde kullanılmak üzere
+        hazır bekliyor; şu an hiçbir yerden çağrılmıyor.
+        """
+        self.current_total_exposure_pct = max(0.0, self.current_total_exposure_pct - position_size_pct)
+        self.current_daily_pnl_pct += realized_pnl_pct

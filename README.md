@@ -1,5 +1,23 @@
 # Hibrit Trading Sistemi — Çok Varlıklı, Yarı-Otomatik
 
+## Sistemin Amacı
+
+Bu sistemin amacı **"sinyal öner" değil, tam bir pozisyon yaşam döngüsü**
+yönetmektir:
+
+```
+öner → insan onaylar → GERÇEK fiyattan gir → izle → kapat → öğren
+```
+
+Çoğu basit trading botu ilk üç adımda durur (sinyal üretir, onaylatır, emir
+gönderir) ve orada biter — pozisyon "açıldı" diye kaydedilir ama bir daha
+hiç kapatılmaz, gerçekleşen kâr/zarar hiç ölçülmez, sistem geçmişinden hiç
+öğrenmez. Bu proje bilinçli olarak döngüyü TAMAMLAMAYI hedefliyor: her
+onaylanan işlem gerçek bir giriş fiyatıyla kaydedilir (`entry_price`),
+`/kapat` komutuyla kapatılıp gerçekleşen PnL hesaplanır, bu da hem risk
+katmanının (`toplam maruziyet`, `art arda kayıp soğutması`) hem LLM ajan
+zincirinin ("bu sembolde geçmişte ne oldu") gerçek veriyle çalışmasını sağlar.
+
 Bu proje, `hibrit-trading-sistemi-tasarimi.md` belgesinde tanımlanan 9 katmanlı
 mimarinin **çalışan kod iskeletidir**. Faz 0-4 ve Faz 6 (veri katmanı, klasik
 strateji, backtest, mandate/risk katmanı, Telegram onay akışı, ML sinyali,
@@ -20,7 +38,8 @@ trading_system/
 │   └── storage.py             # Parquet + DuckDB depolama (Katman 2)
 ├── signals/                   # Katman 3: sinyal üretimi
 │   ├── classic/
-│   │   └── sma_cross_strategy.py   # 3a: klasik gösterge stratejisi
+│   │   ├── sma_cross_strategy.py   # 3a: backtrader stratejisi (sadece backtest için)
+│   │   └── live_signal.py          # 3a: main.py'nin kullandığı CANLI sinyal (TAMAMLANDI)
 │   ├── ml/
 │   │   ├── features.py              # 3b: özellik mühendisliği + etiketleme (TAMAMLANDI)
 │   │   ├── train.py                 # 3b: walk-forward model eğitimi (TAMAMLANDI)
@@ -31,6 +50,7 @@ trading_system/
 │   │   ├── state.py                 # paylaşılan ajan state şeması
 │   │   ├── prompts.py               # her ajan rolü için prompt şablonları
 │   │   ├── nodes.py                 # bağımsız test edilebilir ajan düğümleri
+│   │   ├── news_fetcher.py          # NewsAPI.org ile gerçek haber çekme (TAMAMLANDI)
 │   │   └── agent_chain.py           # zinciri birleştiren orkestratör
 │   ├── market_making/                # 3d: piyasa yapıcılığı (TAMAMLANDI)
 │   │   ├── avellaneda_stoikov.py    # saf matematik (rezervasyon fiyatı, spread)
@@ -56,7 +76,11 @@ trading_system/
 │   ├── test_market_making.py         # Katman 3d (Avellaneda-Stoikov) testleri
 │   ├── test_mm_backtest.py           # Katman 3d/5 (fill simülasyonu) testleri
 │   ├── test_alpaca_connector.py      # Katman 1 (Alpaca veri ayrıştırma) testleri
-│   └── test_alpaca_trading_client.py # Katman 6 (Alpaca emir payload) testleri
+│   ├── test_alpaca_trading_client.py # Katman 6 (Alpaca emir payload) testleri
+│   ├── test_decision_log.py          # Katman 7 (açık pozisyon/exposure/göç) testleri
+│   ├── test_news_fetcher.py          # Katman 3c (haber biçimlendirme) testleri
+│   ├── test_live_signal.py           # Katman 3a (canlı SMA kesişimi) testleri
+│   └── test_order_router.py          # Katman 6 (dry-run/kaldıraç kontrolü) testleri
 ├── main.py                     # Uçtan uca akışı birbirine bağlayan giriş noktası
 └── requirements.txt
 ```
@@ -123,6 +147,21 @@ dosyalarda `python -m py_compile` ile doğrulandı.
    python -m execution.telegram_bot
    ```
 
+   **Telegram komutları** (`python -m main` çalışırken kullanılabilir):
+   - `/durum` — bekleyen (henüz onaylanmamış) işlem önerilerini listeler
+   - `/pozisyonlar` — açık (onaylanmış, henüz kapatılmamış) tüm pozisyonları,
+     giriş fiyatlarıyla birlikte listeler
+   - `/kapat <id> <cikis_fiyati>` — bir pozisyonu kapatır, gerçekleşen PnL'i
+     giriş/çıkış fiyatından hesaplar, `risk_manager`'ın toplam maruziyetini
+     ve `decision_log`'un art arda kayıp sayacını günceller. Örnek:
+     `/kapat 3 65000.5`. **Şu an manuel** — borsadan otomatik pozisyon
+     kapanış tespiti yapan bir izleyici henüz yok (bkz. Sıradaki Adımlar).
+   - `/dur` — **acil durdurma**: kill-switch'i uzaktan (Telegram'dan)
+     tetikler, sistem yeni işlem önerisi üretmeyi durdurur (mevcut açık
+     pozisyonlar etkilenmez). Sunucuya SSH ile bağlanmadan telefonunuzdan
+     durdurabilmeniz için eklendi.
+   - `/devam` — kill-switch'i kaldırır, normal çalışmaya devam eder.
+
 7. **Testleri çalıştırın:**
    ```bash
    pytest tests/ -v
@@ -173,6 +212,72 @@ dosyalarda `python -m py_compile` ile doğrulandı.
   python -m data_layer.connectors.ccxt_connector --exchange binance --symbol BTC/USDT --timeframe 1m --days 30
   python -m backtest.run_mm_backtest --data data/ohlcv/BTC_USDT_1m.parquet
   ```
+- ~~**Sürekli çalışma modu + hata dayanıklılığı**~~ ✅ Tamamlandı: `main.py`
+  artık `LOOP_INTERVAL_SECONDS` (.env) ayarlanırsa tek seferlik bir betik
+  olmaktan çıkıp SÜREKLİ çalışan bir servise dönüşüyor (her N saniyede bir
+  tüm sembolleri yeniden tarıyor). Ayrıca her sembol artık ayrı bir
+  try/except içinde işleniyor — bir sembolde beklenmeyen bir hata (API
+  zaman aşımı vb.) artık TÜM programı çökertmiyor, sadece o sembol
+  atlanıp devam ediliyor. `Ctrl+C` de artık çirkin bir traceback yerine
+  düzgün bir mesajla kapanıyor.
+- ~~**Gerçek klasik sinyal (placeholder'ın kaldırılması)**~~ ✅ Tamamlandı:
+  `main.py` kurulduğu günden beri `get_classic_signal_placeholder()` diye
+  bir fonksiyon kullanıyordu — piyasada ne olursa olsun HER ZAMAN sabit
+  `"long", confidence=0.6` döndüren bir sahte sinyaldi. Bu fonksiyon
+  tamamen kaldırıldı; yerine `signals/classic/live_signal.py` geldi —
+  `data_layer.storage`'daki en güncel veriden GERÇEK bir SMA10/30
+  kesişimi hesaplıyor (backtrader'ın `CrossOver`'ıyla aynı mantık,
+  sadece pandas ile). Kesişim yoksa veya veri yetersizse `None` döner
+  (sinyal ÜRETMEZ) — "belirsizse işlem yapma" ilkesi burada da geçerli.
+  Testler: `tests/test_live_signal.py` (7 test, sentetik fiyat
+  serileriyle golden/death cross tespiti doğrulanıyor).
+- ~~**Sürekli modda veri yenileme**~~ ✅ Tamamlandı: `main.py` sürekli mod
+  (`LOOP_INTERVAL_SECONDS`) eklendikten SONRA BİLE hiçbir zaman veriyi
+  yenilemiyordu — her tur, bir kez manuel indirilmiş eski veriyle
+  çalışıyordu. Artık her `run_one_pass()` öncesi `refresh_market_data()`
+  çağrılıyor: her sembol için (varlık sınıfına göre doğru konnektörle)
+  son birkaç günün verisi çekilip **mevcut parquet dosyasıyla birleştiriliyor**
+  (üzerine yazılmıyor — bu, ML modelinin ihtiyaç duyduğu uzun geçmişi
+  silmemek için kritik). Bir sembolde ağ hatası olursa sadece o sembol
+  atlanır.
+- ~~**Test kapsamını genişleten mimari düzeltme**~~ ✅ Tamamlandı:
+  `risk/risk_manager.py`, sadece tip belirtmek için `risk/mandate.py`'yi
+  (dolayısıyla `pydantic`'i) import ediyordu — oysa `Mandate` sınıfının
+  kendisine runtime'da hiç ihtiyacı yoktu (her şey duck-typing). Bu
+  importu `TYPE_CHECKING` altına almak, `CandidateTrade`/`ApprovedOrderDraft`'a
+  bağımlı olan **tüm zinciri** (`signals/aggregator.py`,
+  `execution/order_router.py`, `signals/classic/live_signal.py` ve
+  bunların testleri) `pydantic` kurulu olmayan ortamlarda bile
+  çalıştırılabilir hale getirdi — kısıtlı/CI ortamları için önemli bir
+  dayanıklılık kazanımı.
+- ~~**Pozisyon yaşam döngüsü (giriş fiyatı + kapatma + PnL)**~~ ✅ Tamamlandı:
+  `monitoring/decision_log.py`'ye `entry_price` sütunu eklendi (eski
+  veritabanlarınız için güvenli otomatik göç/migration dahil —
+  `tests/test_decision_log.py::test_migration_adds_entry_price_to_old_schema_db`
+  ile test edildi), `execution/order_router.py` artık dry-run'da bile
+  kripto için gerçek bir ticker fiyatı çekip `entry_price` olarak
+  kaydediyor, Telegram'a `/pozisyonlar` ve `/kapat <id> <cikis_fiyati>`
+  komutları eklendi. Bu, `record_position_closed()`'in ve
+  `consecutive_losses()`'ün (art arda kayıp soğutması) ilk kez GERÇEKTEN
+  işlevsel olmasını sağlıyor — daha önce hiçbir yerden çağrılmadıkları
+  için birer "ölü kod" idi.
+  **Hâlâ eksik:** Otomatik bir pozisyon izleyici (borsadaki gerçek
+  kapanışı kendiliğinden tespit eden bir bileşen) yok — `/kapat` şu an
+  manuel, siz borsada pozisyonu kapattığınızda buradan da bildiriyorsunuz.
+  Hisse (equity) tarafında `entry_price` henüz yakalanmıyor (Alpaca'nın
+  ayrı bir canlı fiyat/Data API akışı gerekir, henüz bağlanmadı).
+- ~~**Gerçek haber kaynağı (LLM news_analyst)**~~ ✅ Tamamlandı:
+  `signals/llm_agents/news_fetcher.py` — [public-apis/public-apis](https://github.com/public-apis/public-apis)
+  reposunun "News" kategorisi taranıp NewsAPI.org seçildi (basit REST,
+  ücretsiz geliştirici katmanı). `news_analyst_node` şimdiye kadar hiçbir
+  zaman gerçek bir haber kaynağına sahip olmamıştı — `news_text` hep
+  `None` geçiyordu. `.env`'de `NEWSAPI_KEY` ayarlarsanız gerçek başlıklar
+  LLM'e besleniyor; ayarlamazsanız sistem eskisi gibi (haber verisi
+  olmadan) çalışmaya devam ediyor — geriye dönük uyumluluk bozulmadı.
+  **Telif hakkı notu:** sadece başlık + kısa özet kullanılıyor, tam
+  makale metni asla çekilmiyor/saklanmıyor (bkz. dosya başındaki tasarım
+  notu). Testler: `tests/test_news_fetcher.py` (ağ gerektirmez, sadece
+  biçimlendirme mantığını doğrular).
 - **Faz 5 — Küçük sermaye ile canlı test:** Bu bir kod aşaması değil,
   operasyonel bir aşamadır. Sırasıyla: (1) tüm testleri kendi makinenizde
   çalıştırın, (2) `dry_run=True` ile paper-trading modunda en az birkaç

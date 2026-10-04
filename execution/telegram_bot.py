@@ -190,6 +190,19 @@ class ApprovalBot:
         lines = [f"#{rid}: {p.draft.symbol} {p.draft.side}" for rid, p in self._pending.items()]
         await update.message.reply_text("Bekleyen öneriler:\n" + "\n".join(lines))
 
+    def register_command(self, command: str, handler) -> None:
+        """
+        main.py'nin decision_log/risk_manager'a erişimi olan EK Telegram
+        komutları (ör. `/pozisyonlar`, `/kapat`) kaydetmesi içindir.
+        ApprovalBot bilerek decision_log/risk_manager'ı DOĞRUDAN bilmiyor
+        (katmanlar arası bağımlılığı azaltmak için) — main.py bu metodla
+        kendi handler'larını enjekte eder.
+
+        command: başında "/" OLMADAN (ör. "pozisyonlar").
+        handler: `async def handler(update, context) -> None` imzalı fonksiyon.
+        """
+        self.app.add_handler(CommandHandler(command, handler))
+
     def run_polling(self) -> None:
         """
         Botu bağımsız (standalone) test modunda başlatır (bloklayıcı çağrı).

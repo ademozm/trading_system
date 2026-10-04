@@ -119,3 +119,17 @@ def test_parse_trader_json_direct() -> None:
     assert _parse_trader_json('{"side": "long"}') == {"side": "long"}
     assert _parse_trader_json("tamamen bozuk metin") is None
     assert _parse_trader_json('önce metin {"side": "short"} sonra metin') == {"side": "short"}
+
+
+def test_trader_node_handles_valid_json_that_is_not_a_dict() -> None:
+    """
+    KRİTİK REGRESYON TESTİ: json.loads('[1,2,3]') veya json.loads('"merhaba"')
+    GEÇERLİ bir JSON'dur ama dict değildir. Düzeltmeden önce bu durumda
+    parsed.get(...) çağrısı AttributeError ile çökerdi.
+    """
+    for bad_but_valid_json in ["[1, 2, 3]", '"sadece bir metin"', "42", "true", "null"]:
+        llm = MockLLMClient(responder=lambda s, u, v=bad_but_valid_json: v)
+        state = trader_node(_base_state(), llm)
+        assert state["error"] is not None, f"'{bad_but_valid_json}' için hata bekleniyordu"
+        assert state["trader_side"] == "flat"
+        assert state["trader_confidence"] == 0.0

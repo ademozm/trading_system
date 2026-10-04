@@ -14,9 +14,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from risk.mandate import Mandate
+if TYPE_CHECKING:
+    # KRİTİK TASARIM DÜZELTMESİ: Mandate importu SADECE tip belirtmek için
+    # kullanılıyordu — RiskManager, Mandate'in metodlarını duck-typing ile
+    # çağırıyor (izomorf herhangi bir nesne işe yarar), Mandate sınıfının
+    # KENDİSİNE runtime'da hiç ihtiyaç yok. `from __future__ import
+    # annotations` sayesinde tüm tip belirtimleri string olarak saklanıyor,
+    # bu yüzden bu importu TYPE_CHECKING altına almak güvenli. Bunun
+    # faydası: artık bu modül (ve CandidateTrade/ApprovedOrderDraft'a
+    # bağımlı olan aggregator.py, order_router.py, live_signal.py gibi
+    # her şey) `pydantic` KURULU OLMAYAN bir ortamda bile import
+    # edilebiliyor — daha önce sadece Mandate'i type hint olarak kullanan
+    # bu dosya yüzünden TÜM zincir pydantic'e bağımlı hale geliyordu.
+    from risk.mandate import Mandate
 
 
 class RejectionReason(str, Enum):
@@ -141,13 +153,26 @@ class RiskManager:
         """
         self.current_total_exposure_pct += position_size_pct
 
-    def record_position_closed(self, position_size_pct: float, realized_pnl_pct: float) -> None:
+    def record_position_closed(self, symbol: str, position_size_pct: float, realized_pnl_pct: float) -> None:
         """
-        Bir pozisyon kapandığında hem maruziyeti azaltır hem günlük PnL'i
-        günceller. NOT: main.py şu an pozisyon kapanışlarını TAKİP ETMİYOR
-        (Faz 5'in bir parçası — gerçek bir pozisyon izleyici/monitor
-        gerektirir). Bu metod, o bileşen eklendiğinde kullanılmak üzere
-        hazır bekliyor; şu an hiçbir yerden çağrılmıyor.
+        Bir pozisyon kapandığında maruziyeti azaltır, günlük PnL'i günceller
+        VE art arda kayıp sayacını (symbol_consecutive_losses) günceller.
+
+        KRİTİK DÜZELTME: Önceki sürümde bu metod art arda kayıp sayacına HİÇ
+        dokunmuyordu — `main.py`'nin `/kapat` komutu üzerinden GERÇEKTEN
+        çağrılmaya başlamasından SONRA fark edildi. Bu olmadan, sürekli
+        modda (LOOP_INTERVAL_SECONDS > 0) bir sembolde art arda zararlı
+        pozisyonlar kapatılsa bile "soğutma" özelliği devreye girmiyordu —
+        sadece programı yeniden başlattığınızda (decision_log'dan yeniden
+        hesaplanınca) güncelleniyordu.
         """
         self.current_total_exposure_pct = max(0.0, self.current_total_exposure_pct - position_size_pct)
         self.current_daily_pnl_pct += realized_pnl_pct
+
+        if realized_pnl_pct < 0:
+            self.symbol_consecutive_losses[symbol] = self.symbol_consecutive_losses.get(symbol, 0) + 1
+        else:
+            # Kazançlı (veya başabaş) bir kapanış, o sembolün art arda
+            # kayıp sayacını sıfırlar — decision_log.consecutive_losses()
+            # ile aynı mantık (bkz. monitoring/decision_log.py).
+            self.symbol_consecutive_losses[symbol] = 0

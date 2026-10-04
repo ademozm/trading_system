@@ -1,6 +1,6 @@
 # --- Katman 1: Borsa/Broker bağlantısı ---
 ccxt>=4.3.0
-requests>=2.31.0        # Alpaca konnektörü için (hisse senedi verisi)
+requests>=2.31.0        # Alpaca konnektörü ve haber çekme (news_fetcher.py) için
 
 # --- Katman 2: Veri depolama ---
 pandas>=2.2.0

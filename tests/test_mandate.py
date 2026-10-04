@@ -194,7 +194,7 @@ def test_exposure_accumulates_across_multiple_approvals_in_same_run(tmp_path: Pa
 def test_record_position_closed_decreases_exposure_and_updates_pnl(tmp_path: Path) -> None:
     rm = _make_risk_manager(base_path=str(tmp_path))
     rm.record_position_opened(0.02)
-    rm.record_position_closed(0.02, realized_pnl_pct=-0.005)
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.005)
 
     assert rm.current_total_exposure_pct == 0.0
     assert rm.current_daily_pnl_pct == -0.005
@@ -203,5 +203,55 @@ def test_record_position_closed_decreases_exposure_and_updates_pnl(tmp_path: Pat
 def test_record_position_closed_exposure_never_goes_negative(tmp_path: Path) -> None:
     rm = _make_risk_manager(base_path=str(tmp_path))
     # Hiç pozisyon açılmamışken "kapatma" çağrılırsa exposure negatife düşmemeli
-    rm.record_position_closed(0.05, realized_pnl_pct=0.01)
+    rm.record_position_closed("BTC/USDT", 0.05, realized_pnl_pct=0.01)
     assert rm.current_total_exposure_pct == 0.0
+
+
+def test_record_position_closed_increments_consecutive_losses(tmp_path: Path) -> None:
+    """
+    KRİTİK REGRESYON TESTİ: record_position_closed art arda kayıp sayacını
+    HİÇ güncellemiyordu — /kapat komutu üzerinden gerçekten çağrılmaya
+    başlanmasından SONRA fark edildi. Bu olmadan, sürekli modda bir
+    sembolde art arda zararlı kapanışlar "soğutma" tetiklemiyordu.
+    """
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    assert rm.symbol_consecutive_losses.get("BTC/USDT", 0) == 0
+
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.01)
+    assert rm.symbol_consecutive_losses["BTC/USDT"] == 1
+
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.01)
+    assert rm.symbol_consecutive_losses["BTC/USDT"] == 2
+
+    # Farklı sembol etkilenmemeli
+    assert rm.symbol_consecutive_losses.get("ETH/USDT", 0) == 0
+
+
+def test_record_position_closed_resets_consecutive_losses_on_win(tmp_path: Path) -> None:
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.01)
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.01)
+    assert rm.symbol_consecutive_losses["BTC/USDT"] == 2
+
+    rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=0.02)  # kazanç
+    assert rm.symbol_consecutive_losses["BTC/USDT"] == 0, "Kazançlı kapanış sayacı sıfırlamalı"
+
+
+def test_record_position_closed_cooldown_takes_effect_within_same_run(tmp_path: Path) -> None:
+    """
+    Uçtan uca senaryo: art arda 3 kayıp sonrası (mandate'in
+    max_consecutive_losses_per_symbol=3 varsayılanı), programı yeniden
+    BAŞLATMADAN, aynı RiskManager örneğinde soğutmanın devreye girdiğini
+    doğrular.
+    """
+    rm = _make_risk_manager(base_path=str(tmp_path))
+    for _ in range(3):
+        rm.record_position_closed("BTC/USDT", 0.02, realized_pnl_pct=-0.01)
+
+    trade = CandidateTrade(
+        symbol="BTC/USDT", side="long", asset_class="crypto",
+        confidence=0.8, rationale="test",
+    )
+    result = rm.check(trade)
+    assert not result.approved
+    assert result.rejection_reason == RejectionReason.SYMBOL_COOLDOWN

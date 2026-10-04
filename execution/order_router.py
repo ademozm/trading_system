@@ -87,26 +87,46 @@ class OrderRouter:
         account_equity: mevcut toplam portföy değeri (position_size_pct'i
         gerçek miktara çevirmek için gereklidir). Bu değer main.py
         tarafından güncel hesap bakiyesinden sağlanmalıdır.
+
+        Dönen sözlükteki "price" alanı — main.py bunu decision_log'a
+        `entry_price` olarak kaydeder (PnL hesaplayabilmek için ZORUNLU).
+        Kripto için dry-run'da BİLE gerçek bir ticker fiyatı çekilir (genel/
+        public endpoint, API anahtarı gerekmez) — bu, dry-run testlerinin
+        bile gerçekçi giriş fiyatlarıyla çalışmasını sağlar. Hisse (equity)
+        için şu an canlı fiyat çekme uygulanmadı (Alpaca'nın ayrı bir Data
+        API akışı gerekir); "price" None döner, entry_price kaydedilmez.
         """
         notional = account_equity * draft.position_size_pct
         order_side = "buy" if draft.side == "long" else "sell"
         asset_class = infer_asset_class(draft.symbol)
 
         if self.dry_run:
+            price = None
+            if asset_class == "crypto":
+                try:
+                    exchange = self._get_ccxt_exchange()
+                    ticker = exchange.fetch_ticker(draft.symbol)
+                    price = ticker["last"]
+                except Exception as e:  # pragma: no cover - ağ/borsa hatası
+                    print(f"[order_router] (DRY-RUN) Uyarı: fiyat çekilemedi ({e}); entry_price kaydedilemeyecek.")
+
             print(
                 f"[order_router] (DRY-RUN, {asset_class}) {order_side.upper()} {draft.symbol} "
                 f"~{notional:.2f} birim değerinde, kaldıraç={draft.leverage}x "
+                f"(fiyat: {price if price is not None else 'bilinmiyor'}) "
                 f"— GERÇEK EMİR GÖNDERİLMEDİ."
             )
             return {
                 "status": "dry_run", "symbol": draft.symbol, "side": order_side,
-                "notional": notional, "asset_class": asset_class,
+                "notional": notional, "asset_class": asset_class, "price": price,
             }
 
         if asset_class == "equity":
             client = self._get_alpaca_client()
             order = client.place_market_order(draft.symbol, notional, order_side)
             print(f"[order_router] GERÇEK HİSSE EMRİ GÖNDERİLDİ ({'PAPER' if self.alpaca_paper else 'CANLI'}): {order}")
+            if not order.get("price"):  # Alpaca yanıtı doldurana kadar (fill_price farklı alanda gelebilir)
+                order["price"] = None
             return order
 
         # asset_class == "crypto" -> ccxt
@@ -130,4 +150,6 @@ class OrderRouter:
             amount=amount,
         )
         print(f"[order_router] GERÇEK KRİPTO EMRİ GÖNDERİLDİ: {order}")
+        if not order.get("price"):  # market emirlerinde ccxt "price" alanını None bırakabilir
+            order["price"] = price
         return order

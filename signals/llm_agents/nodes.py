@@ -96,6 +96,12 @@ def _parse_trader_json(raw_response: str) -> dict | None:
     LLM'ler bazen JSON'un etrafına ```json ... ``` gibi fence ekler veya
     ekstra metin ekler. Basit bir temizleme + parse denemesi yapılır;
     başarısız olursa None döner (sessizce yanlış bir karar UYDURULMAZ).
+
+    ÖNEMLİ: json.loads() "merhaba" veya [1,2,3] gibi GEÇERLİ ama sözlük
+    OLMAYAN bir JSON değerini de başarıyla parse edebilir — bu durumda
+    çağıran kodun beklediği `.get()` metodu olmadığı için AttributeError
+    fırlardı. `_try_json_loads` bu yüzden sonucun gerçekten bir dict
+    olduğunu da doğruluyor.
     """
     text = raw_response.strip()
     if text.startswith("```"):
@@ -104,16 +110,26 @@ def _parse_trader_json(raw_response: str) -> dict | None:
             text = text[4:]
         text = text.strip()
 
+    parsed = _try_json_loads(text)
+    if parsed is not None:
+        return parsed
+
+    # Son çare: metin içinde ilk '{' ile son '}' arasını dene
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        parsed = _try_json_loads(text[start : end + 1])
+        if parsed is not None:
+            return parsed
+
+    logger.warning("Trader JSON ayrıştırma başarısız oldu: %r", raw_response)
+    return None
+
+
+def _try_json_loads(text: str) -> dict | None:
+    """json.loads() dener; sonuç dict DEĞİLSE (ör. liste, string, sayı) None döner."""
     try:
-        return json.loads(text)
+        result = json.loads(text)
     except json.JSONDecodeError:
-        # Son çare: metin içinde ilk '{' ile son '}' arasını dene
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                pass
-        logger.warning("Trader JSON ayrıştırma başarısız oldu: %r", raw_response)
         return None
+    return result if isinstance(result, dict) else None

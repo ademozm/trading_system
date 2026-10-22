@@ -1,0 +1,5 @@
+symbol,market,name
+XAUUSD=X,emtia,Altın (Spot Ons/USD)
+XAGUSD=X,emtia,Gümüş (Spot Ons/USD)
+CL=F,emtia,Ham Petrol (WTI Vadeli)
+NG=F,emtia,Doğalgaz (Henry Hub Vadeli)

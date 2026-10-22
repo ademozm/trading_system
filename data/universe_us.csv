@@ -1,0 +1,108 @@
+symbol,market,name
+AAPL,us,Apple
+MSFT,us,Microsoft
+GOOGL,us,Alphabet A
+GOOG,us,Alphabet C
+AMZN,us,Amazon
+NVDA,us,NVIDIA
+META,us,Meta Platforms
+TSLA,us,Tesla
+BRK-B,us,Berkshire Hathaway
+JPM,us,JPMorgan Chase
+JNJ,us,Johnson & Johnson
+V,us,Visa
+PG,us,Procter & Gamble
+UNH,us,UnitedHealth
+HD,us,Home Depot
+MA,us,Mastercard
+XOM,us,Exxon Mobil
+CVX,us,Chevron
+ABBV,us,AbbVie
+PFE,us,Pfizer
+KO,us,Coca-Cola
+PEP,us,PepsiCo
+MRK,us,Merck
+WMT,us,Walmart
+BAC,us,Bank of America
+DIS,us,Walt Disney
+ADBE,us,Adobe
+CRM,us,Salesforce
+NFLX,us,Netflix
+CSCO,us,Cisco Systems
+ACN,us,Accenture
+TMO,us,Thermo Fisher
+ABT,us,Abbott Labs
+LIN,us,Linde
+COST,us,Costco
+AVGO,us,Broadcom
+TXN,us,Texas Instruments
+DHR,us,Danaher
+NKE,us,Nike
+MCD,us,McDonald's
+NEE,us,NextEra Energy
+PM,us,Philip Morris
+UPS,us,United Parcel Service
+HON,us,Honeywell
+IBM,us,IBM
+QCOM,us,Qualcomm
+UNP,us,Union Pacific
+ORCL,us,Oracle
+LOW,us,Lowe's
+AMD,us,Advanced Micro Devices
+INTU,us,Intuit
+CAT,us,Caterpillar
+GS,us,Goldman Sachs
+SBUX,us,Starbucks
+BA,us,Boeing
+AMGN,us,Amgen
+INTC,us,Intel
+SPGI,us,S&P Global
+BLK,us,BlackRock
+DE,us,Deere & Co
+MDT,us,Medtronic
+AXP,us,American Express
+GE,us,General Electric
+ISRG,us,Intuitive Surgical
+BKNG,us,Booking Holdings
+PLD,us,Prologis
+MMM,us,3M
+GILD,us,Gilead Sciences
+CVS,us,CVS Health
+MO,us,Altria
+ADP,us,ADP
+SYK,us,Stryker
+T,us,AT&T
+VRTX,us,Vertex Pharmaceuticals
+TJX,us,TJX Companies
+C,us,Citigroup
+ZTS,us,Zoetis
+MDLZ,us,Mondelez
+CI,us,Cigna
+SO,us,Southern Company
+DUK,us,Duke Energy
+BDX,us,Becton Dickinson
+SCHW,us,Charles Schwab
+PNC,us,PNC Financial
+USB,us,U.S. Bancorp
+TGT,us,Target
+MMC,us,Marsh & McLennan
+CB,us,Chubb
+EL,us,Estée Lauder
+EOG,us,EOG Resources
+AON,us,Aon
+APD,us,Air Products
+SLB,us,Schlumberger
+ITW,us,Illinois Tool Works
+NSC,us,Norfolk Southern
+FDX,us,FedEx
+WM,us,Waste Management
+EMR,us,Emerson Electric
+PSA,us,Public Storage
+ICE,us,Intercontinental Exchange
+ETN,us,Eaton
+ROP,us,Roper Technologies
+GD,us,General Dynamics
+ADI,us,Analog Devices
+KMB,us,Kimberly-Clark
+PGR,us,Progressive
+PSX,us,Phillips 66

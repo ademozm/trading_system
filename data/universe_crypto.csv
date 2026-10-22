@@ -1,0 +1,51 @@
+symbol,market,name
+BTC-USD,crypto,Bitcoin
+ETH-USD,crypto,Ethereum
+BNB-USD,crypto,BNB
+SOL-USD,crypto,Solana
+XRP-USD,crypto,XRP
+ADA-USD,crypto,Cardano
+DOGE-USD,crypto,Dogecoin
+AVAX-USD,crypto,Avalanche
+DOT-USD,crypto,Polkadot
+LINK-USD,crypto,Chainlink
+MATIC-USD,crypto,Polygon
+LTC-USD,crypto,Litecoin
+TRX-USD,crypto,TRON
+ATOM-USD,crypto,Cosmos
+UNI-USD,crypto,Uniswap
+XLM-USD,crypto,Stellar
+ETC-USD,crypto,Ethereum Classic
+FIL-USD,crypto,Filecoin
+APT-USD,crypto,Aptos
+NEAR-USD,crypto,NEAR Protocol
+ARB-USD,crypto,Arbitrum
+OP-USD,crypto,Optimism
+VET-USD,crypto,VeChain
+ALGO-USD,crypto,Algorand
+QNT-USD,crypto,Quant
+AAVE-USD,crypto,Aave
+GRT-USD,crypto,The Graph
+SAND-USD,crypto,The Sandbox
+MANA-USD,crypto,Decentraland
+AXS-USD,crypto,Axie Infinity
+EOS-USD,crypto,EOS
+XTZ-USD,crypto,Tezos
+THETA-USD,crypto,Theta Network
+FTM-USD,crypto,Fantom
+HBAR-USD,crypto,Hedera
+EGLD-USD,crypto,MultiversX
+FLOW-USD,crypto,Flow
+CHZ-USD,crypto,Chiliz
+XMR-USD,crypto,Monero
+RUNE-USD,crypto,THORChain
+CRV-USD,crypto,Curve DAO
+MKR-USD,crypto,Maker
+COMP-USD,crypto,Compound
+SNX-USD,crypto,Synthetix
+ZEC-USD,crypto,Zcash
+DASH-USD,crypto,Dash
+ENJ-USD,crypto,Enjin Coin
+BAT-USD,crypto,Basic Attention Token
+1INCH-USD,crypto,1inch
+YFI-USD,crypto,yearn.finance
